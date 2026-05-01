@@ -1,9 +1,18 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
 require("dotenv").config();
 
 const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+    cors: { origin: "*" }
+});
+
+app.set("io", io);
 
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
@@ -19,9 +28,15 @@ app.get("/incidents/:incidentId", getIncidentDetail);
 app.get("/incidents/:incidentId/signals", getSignalsByIncident);
 app.post("/incidents/:incidentId/rca", createRCA);
 app.patch("/incidents/:incidentId/status", updateStatus);
+const { getMetrics } = require("./utils/metrics");
 const processQueue = require("./services/processor");
 
-processQueue();
+processQueue(io);
+
+// Emit metrics every 2 seconds
+setInterval(() => {
+    io.emit("metrics", getMetrics());
+}, 2000);
 
 app.get("/health", (req, res) => {
     res.json({ status: "OK" });
@@ -37,6 +52,6 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.log(err));
 
-app.listen(port, () => {
+server.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });

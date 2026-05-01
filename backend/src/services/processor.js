@@ -1,6 +1,7 @@
 const { removeFromQueue } = require("../queue/signalQueue");
 const Signal = require("../models/Signal");
 const Incident = require("../models/Incident");
+const { incrementSignals } = require("../utils/metrics");
 
 // store recent signals for debouncing
 const debounceMap = new Map();
@@ -12,10 +13,12 @@ function getSeverity(componentId) {
     return "INFO";
 }
 
-function processQueue() {
+function processQueue(io) {
     setInterval(async () => {
         const signal = removeFromQueue();
         if (!signal) return;
+
+        incrementSignals(); // increment metrics
 
         const key = signal.componentId;
         const now = Date.now();
@@ -28,11 +31,16 @@ function processQueue() {
 
                 if (now - entry.timestamp < 10000) {
                     // within 10 sec → attach to same incident
-                    await Signal.create({
+                    const newSignal = await Signal.create({
                         componentId: signal.componentId,
                         message: signal.message,
                         severity: signal.severity || severity,
                         incidentId: entry.incidentId
+                    });
+
+                    io.emit("signal_added", {
+                        incidentId: entry.incidentId,
+                        signal: newSignal
                     });
                     return;
                 }
@@ -47,6 +55,8 @@ function processQueue() {
             });
 
             await incident.save();
+
+            io.emit("incident_created", incident);
 
             // save signal separately with incidentId
             await Signal.create({
